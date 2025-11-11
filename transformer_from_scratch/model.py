@@ -1,3 +1,4 @@
+from curses import KEY_SUSPEND
 import torch
 import torch.nn as nn
 import math
@@ -5,7 +6,7 @@ import math
 class InputEmbeddings(nn.Module):
     ''' Embedding of size (vocab_size, d_model) '''
     def __init__(self, d_model: int, vocab_size: int): 
-        super().__init__()
+        super().__init__() # constuctor
         self.d_model = d_model
         self.vocab_size = vocab_size
         self.embedding = nn.Embedding(vocab_size, d_model) # Map each numbers to 1x512 vectors. Vectors learnt by the model
@@ -62,3 +63,35 @@ def LayerNormalization(nn.Module):
         self.alpha = nn.Parameter(torch.ones(1)) # Multiplied
         self.bias = nn.Paramter(torch.zeros(1)) # Added
 
+    def forward(self, x):
+        mean = x.mean(di=-1, keepdim=True) # Taking mean across the last dim, and avoid collapsing the dim
+        std = x.std(dim=-1, keepdim=True)
+        return self.alpha * (x-mean) / (std + self.eps) + self.bias
+
+class FeedForwardBlock(nn.Module):
+
+    def __init__(self, d_model: int, d_ff: int, dropout: float) -> None:
+        super().__init__()
+        self.linear_1 = nn.Linear(d_model, d_ff) # Has bias by default
+        self.dropout = nn.Dropout(dropout)
+        self.linear_2 = nn.Linear(d_ff, d_model)
+
+    def forward(self, x):
+        # (batch, Seq_len, d_model) -> (Batch, Seq_len, d_ff) -> (Batch, Seq_len, d_model)
+        return self.linear_2(self.dropout(torch.linear_1(x)))
+
+
+class FeedForwardBlock_clean(nn.Module):
+
+    def __init__(self, d_model: int, d_ff: int, dropout: float) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.ReLU(),  # or nn.GELU() for GPT-style transformers
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model)
+        )
+
+    def forward(self, x):
+        # (batch, seq_len, d_model) -> (batch, seq_len, d_ff) -> (batch, seq_len, d_model)
+        return self.net(x)
