@@ -16,11 +16,10 @@ class InputEmbeddings(nn.Module):
 
 class PositionalEncoding(nn.Module):
     ''' Positional Encoding: Vector of size (1 x d_model) to add on each of the input embedding. One for each position. '''
-    def __init__(self, d_model: int, seq_len: int, dropout: float):
+    def __init__(self, d_model: int, seq_len: int):
         super().__init__()
         self.d_model = d_model
         self.seq_len = seq_len
-        self.dropout = nn.Dropout(dropout)
 
         # Create a matrix of shape (seq_len, d_model)
         pe = torch.zeros(seq_len, d_model)
@@ -48,9 +47,7 @@ class PositionalEncoding(nn.Module):
         # .requires_grad_(False) ensures gradients don't flow through positional encodings
         x = x + (self.pe[:, :x.shape[1], :]).requires_grad_(False)
         
-        # Apply dropout for regularization during training
-        # This helps prevent overfitting by randomly zeroing some values
-        return self.dropout(x)
+        return x
 
 class LayerNormalization(nn.Module):
     ''' 
@@ -83,12 +80,11 @@ class LayerNormalization(nn.Module):
 
 class FeedForwardBlock(nn.Module):
 
-    def __init__(self, d_model: int, d_ff: int, dropout: float) -> None:
+    def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(d_model, d_ff),
             nn.ReLU(),  # or nn.GELU() for GPT-style transformers
-            nn.Dropout(dropout),
             nn.Linear(d_ff, d_model)
         )
 
@@ -98,7 +94,7 @@ class FeedForwardBlock(nn.Module):
     
 
 class MultiHeadAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, h: int, dropout: float) -> None:
+    def __init__(self, d_model: int, h: int) -> None:
         super().__init__()
         self.d_model = d_model
         self.h = h
@@ -110,10 +106,9 @@ class MultiHeadAttentionBlock(nn.Module):
         self.w_v = nn.Linear(d_model, d_model)
         
         self.w_o = nn.Linear(d_model, d_model)
-        self.dropout = nn.Dropout(dropout)
     
     @staticmethod #static method means we can call the method without an instance of the class
-    def attention(query, key, value, mask, dropout: nn.Dropout):
+    def attention(query, key, value, mask):
         d_k = query.shape[-1]
         
         # (B, h, l, d_k) @ (B, h, d_k, L) -> (B, h, L, L)
@@ -137,7 +132,7 @@ class MultiHeadAttentionBlock(nn.Module):
         key = key.view(key.shape[0], key.shape[1], self.h, self.d_k).transpose(1, 2)
         value = value.view(value.shape[0], value.shape[1], self.h, self.d_k).transpose(1, 2)
         
-        x, self.attention_scores = MultiHeadAttentionBlock.attention(query, key, value, mask, self.dropout)    
+        x, self.attention_scores = MultiHeadAttentionBlock.attention(query, key, value, mask)    
         
         # (B, h, L, d_k) -> (B, L, h, d_k) -> (B, L, d)
         x = x.transpose(1, 2).contiguous().view(x.shape[0], -1, self.h * self.d_k) # why -1 here and x.shape[1] above?
@@ -147,24 +142,40 @@ class MultiHeadAttentionBlock(nn.Module):
     
 
 class ResidualConnection(nn.Module):
-    def __init__(self, dropout: float) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.dropout = nn.Dropout(dropout)
         self.norm = LayerNormalization()
         
     def forward(self, x: torch.Tensor, sublayer: nn.Module) -> torch.Tensor:
-        return x + self.dropout(sublayer(self.norm(x)))
+        return x + sublayer(self.norm(x))
     
 
-class Encoder(nn.Module):
-    def __init__(self, self_attention_block: MultiHeadAttentionBlock, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
+class EncoderBlock(nn.Module):
+    def __init__(self, self_attention_block: MultiHeadAttentionBlock, feed_forward_block: FeedForwardBlock) -> None:
         super().__init__()
         self.self_attention_block = self_attention_block
         self.feed_forward_block = feed_forward_block
-        self.residual_conections = nn.ModuleList([ResidualConnection(dropout) for i in range(2)]) # nn.ModuleList is a PyTorch container that holds a list of nn.Module objects. It's like a regular Python list, but PyTorch-aware.
+        self.residual_conections = nn.ModuleList([ResidualConnection() for i in range(2)]) # nn.ModuleList is a PyTorch container that holds a list of nn.Module objects. It's like a regular Python list, but PyTorch-aware.
     
         # soruce mask is used to prevent the padding words from interacting with other words
     def forward(self, x: torch.Tensor, src_mask):
         x = self.residual_conections[0](x, lambda x: self.self_attention_block(x, x, x, src_mask)) #SA -> norm -> residual 
         x = self.residual_connection[1](x, self.feed_forward_block)
+        return x
+
+
+class EncoderStack(nn.Module):
+    def __init__(self, num_layers: int, d_model: int, h: int, d_ff: int):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            EncoderBlock(
+                MultiHeadAttentionBlock(d_model, h),
+                FeedForwardBlock(d_model, d_ff)
+            ) 
+            for _ in range(num_layers)
+        ])
+    
+    def forward(self, x, src_mask):
+        for layer in self.layers:
+            x = layer(x, src_mask)
         return x
