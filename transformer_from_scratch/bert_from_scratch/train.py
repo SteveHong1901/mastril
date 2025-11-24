@@ -8,7 +8,6 @@ sys.path.insert(0, str(current_dir))
 
 import torch
 from torch.optim import AdamW
-from transformers import get_linear_schedule_with_warmup
 from tqdm import tqdm
 import argparse
 from config import ModelConfig
@@ -51,15 +50,8 @@ def train(args):
     train_loader = get_dataloader(split="train", batch_size=args.batch_size, max_length=args.max_length)
     test_loader = get_dataloader(split="test", batch_size=args.batch_size, max_length=args.max_length)
 
-    # 3. Optimizer & Scheduler
+    # 3. Optimizer
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
-    
-    num_training_steps = len(train_loader) * args.epochs
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer, 
-        num_warmup_steps=int(0.1 * num_training_steps), 
-        num_training_steps=num_training_steps
-    )
 
     # 4. Training Loop
     print("Starting training...")
@@ -73,20 +65,17 @@ def train(args):
             
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            token_type_ids = batch["token_type_ids"].to(device)
             labels = batch["labels"].to(device)
             
             loss, logits = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
                 labels=labels
             )
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            scheduler.step()
             
             total_loss += loss.item()
             progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
@@ -112,13 +101,11 @@ def evaluate(model, dataloader, device):
         for batch in tqdm(dataloader, desc="Validation"):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            token_type_ids = batch["token_type_ids"].to(device)
             labels = batch["labels"].to(device)
             
             logits = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                token_type_ids=token_type_ids
             )
             
             predictions = torch.argmax(logits, dim=-1)

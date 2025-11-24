@@ -20,19 +20,44 @@ class IMDBDataset(Dataset):
             text,
             add_special_tokens=True,
             max_length=self.max_length,
-            padding="max_length",
+            # padding="max_length",
             truncation=True,
             return_tensors="pt",
         )
 
         return {
-            "input_ids": encoding["input_ids"].flatten(),
-            "attention_mask": encoding["attention_mask"].flatten(),
-            "token_type_ids": encoding["token_type_ids"].flatten(),
+            "input_ids": encoding["input_ids"].squeeze(0), # (1, L) -> (L,)
+            "attention_mask": encoding["attention_mask"].squeeze(0),
             "labels": torch.tensor(label, dtype=torch.long),
         }
 
+def collate_fn(batch):
+    """Batch-level padding (dynamic padding)"""
+    from torch.nn.utils.rnn import pad_sequence
+
+    input_ids = pad_sequence(
+        [item['input_ids'] for item in batch],
+        batch_first=True,
+        padding_value=0
+    ) # pad sequence stack the things for us
+
+    attention_mask = pad_sequence(
+        [item['attention_mask'] for item in batch],
+        batch_first=True,
+        padding_value=0
+    )
+
+    labels = torch.stack([item['labels'] for item in batch])
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "labels": labels,
+    }
+
+
+
 def get_dataloader(split="train", batch_size=8, max_length=512):
     dataset = IMDBDataset(split=split, max_length=max_length)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=(split == "train"))
+    return DataLoader(dataset, batch_size=batch_size, shuffle=(split == "train"), collate_fn=collate_fn)
 
